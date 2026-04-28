@@ -1,7 +1,7 @@
 import { Router } from "express";
 import cookieParser from "cookie-parser";
-import * as dbModule from "../../../lib/db/src/index.js";
-const { db, streamersTable } = dbModule as any;
+import * as dbModule from "@workspace/db";
+const { db, streamersTable, confessionsTable } = dbModule as any;
 import { eq } from "drizzle-orm";
 
 // 중요: 라우터 폴더(src/routes)에서 라이브러리 폴더(src/lib)로 접근하므로 ../lib/ 경로 사용
