@@ -5,7 +5,7 @@ import { eq, sql, desc } from "drizzle-orm";
 
 const router = Router();
 
-// [GET] 전체 스트리머 목록 (메인 페이지용)
+// [GET] 전체 스트리머 목록
 (router as any).get("/streamers", async (_req: any, res: any) => {
   try {
     const rows = await (db as any)
@@ -14,21 +14,29 @@ const router = Router();
         channelId: streamersTable.channelId,
         name: streamersTable.name,
         profileImageUrl: streamersTable.profileImageUrl,
-        // 공개된 고민 개수 카운트
+        createdAt: streamersTable.createdAt, // 정렬을 위해 선택 필요
         confessionCount: sql`CAST(COUNT(CASE WHEN ${confessionsTable.isPrivate} = false THEN 1 END) AS INTEGER)`,
       })
       .from(streamersTable)
       .leftJoin(confessionsTable, eq(confessionsTable.streamerId, streamersTable.id))
-      .groupBy(streamersTable.id)
+      // ★ 중요: SELECT절에 있는 집계 함수 외의 모든 컬럼을 넣어줘야 에러가 안 납니다.
+      .groupBy(
+        streamersTable.id,
+        streamersTable.channelId,
+        streamersTable.name,
+        streamersTable.profileImageUrl,
+        streamersTable.createdAt
+      )
       .orderBy(desc(streamersTable.createdAt));
       
     return res.json(rows);
   } catch (e: any) {
-    return res.status(500).json({ error: e.message });
+    console.error("[GET /streamers 에러]:", e.message);
+    return res.status(500).json({ error: "Failed to fetch streamers", message: e.message });
   }
 });
 
-// [GET] 특정 스트리머 상세 정보 (상세 페이지 진입용)
+// [GET] 특정 스트리머 상세 정보
 (router as any).get("/streamers/:channelId", async (req: any, res: any) => {
   try {
     const { channelId } = req.params;
