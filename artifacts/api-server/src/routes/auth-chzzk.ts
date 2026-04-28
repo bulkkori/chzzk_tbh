@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
-import { logger } from "./logger.js"; // 1. .js 확장자 추가
+import { logger } from "./logger.js"; // .js 확장자 추가
 
-// (중간 주석 생략)
+// ---------------------------------------------------------------------------
+// Official Chzzk Open API (https://chzzk.gitbook.io/chzzk).
+// ---------------------------------------------------------------------------
 
 const ACCOUNT_INTERLOCK_URL = "https://chzzk.naver.com/account-interlock";
 const OPEN_API_BASE = "https://openapi.chzzk.naver.com";
@@ -14,7 +16,7 @@ const STATE_SECRET =
   process.env.STREAMER_TOKEN_SECRET ??
   "dev-state-secret-change-me";
 
-const STATE_TTL_SECONDS = 10 * 60;
+const STATE_TTL_SECONDS = 10 * 60; // 10 minutes
 
 export class ChzzkConfigError extends Error {
   constructor(message: string) {
@@ -31,15 +33,20 @@ export function assertChzzkConfigured(): void {
   }
 }
 
+/** Chzzk 개발자 콘솔에 등록한 리다이렉트 URI와 정확히 일치해야 합니다. */
 export function getRedirectUri(): string {
   const uri = process.env.CHZZK_REDIRECT_URI;
   if (!uri) {
     throw new ChzzkConfigError(
-      "CHZZK_REDIRECT_URI 환경변수를 설정해 주세요.",
+      "CHZZK_REDIRECT_URI 환경변수를 설정해 주세요. 예: https://your-api.vercel.app/api/auth/chzzk/callback",
     );
   }
   return uri;
 }
+
+// ---------------------------------------------------------------------------
+// State 서명 및 검증 로직
+// ---------------------------------------------------------------------------
 
 function hmac(payload: string): string {
   return crypto.createHmac("sha256", STATE_SECRET).update(payload).digest("hex");
@@ -107,6 +114,10 @@ function sanitizeReturnTo(input: string | undefined | null): string {
 
 export { sanitizeReturnTo };
 
+// ---------------------------------------------------------------------------
+// Authorization URL 생성
+// ---------------------------------------------------------------------------
+
 export function buildAuthorizeUrl(nonce: string): string {
   assertChzzkConfigured();
   const params = new URLSearchParams({
@@ -116,6 +127,10 @@ export function buildAuthorizeUrl(nonce: string): string {
   });
   return `${ACCOUNT_INTERLOCK_URL}?${params.toString()}`;
 }
+
+// ---------------------------------------------------------------------------
+// 토큰 교환 (Token Exchange)
+// ---------------------------------------------------------------------------
 
 interface TokenResponse {
   accessToken: string;
@@ -129,7 +144,7 @@ export async function exchangeCodeForToken(
   state: string,
 ): Promise<TokenResponse> {
   assertChzzkConfigured();
-  // 2. fetch 결과(Response)를 any로 캐스팅하여 타입 에러 방지
+  // fetch 결과 타입을 any로 캐스팅하여 타입 충돌 방지
   const res: any = await fetch(`${OPEN_API_BASE}/auth/v1/token`, {
     method: "POST",
     headers: {
@@ -151,11 +166,15 @@ export async function exchangeCodeForToken(
       "chzzk token exchange failed",
     );
     throw new Error(
-      json?.message ?? "치지직 토큰 발급에 실패했어요.",
+      json?.message ?? "치지직 토큰 발급에 실패했어요. 잠시 후 다시 시도해 주세요.",
     );
   }
   return json.content;
 }
+
+// ---------------------------------------------------------------------------
+// 유저 및 채널 정보 조회
+// ---------------------------------------------------------------------------
 
 export interface ChzzkUser {
   channelId: string;
@@ -163,6 +182,7 @@ export interface ChzzkUser {
 }
 
 export async function fetchUserMe(accessToken: string): Promise<ChzzkUser> {
+  // fetch 결과 타입을 any로 캐스팅
   const res: any = await fetch(`${OPEN_API_BASE}/open/v1/users/me`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -183,6 +203,9 @@ export interface ChzzkChannel {
   channelImageUrl: string | null;
 }
 
+/**
+ * 공개 채널 정보(이름 + 프로필 이미지)를 가져옵니다.
+ */
 export async function fetchChannelInfo(
   channelId: string,
 ): Promise<ChzzkChannel | null> {
@@ -190,6 +213,7 @@ export async function fetchChannelInfo(
   try {
     const url = new URL(`${OPEN_API_BASE}/open/v1/channels`);
     url.searchParams.set("channelIds", channelId);
+    // fetch 결과 타입을 any로 캐스팅
     const res: any = await fetch(url.toString(), {
       headers: {
         "Client-Id": CLIENT_ID,
