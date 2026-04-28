@@ -5,13 +5,16 @@ import { and, desc, eq, sql } from "drizzle-orm";
 
 const router = Router();
 
-// [GET] 특정 스트리머의 고민 목록 (프론트엔드용 경로)
-// 주소: /api/streamers/:channelId/confessions
-(router as any).get("/streamers/:channelId/confessions", async (req: any, res: any) => {
+/**
+ * 1. [GET] 특정 스트리머의 고민 통계 데이터 (프론트엔드 최우선 요청)
+ * 경로: /api/streamers/:channelId/confessions/stats
+ */
+(router as any).get("/streamers/:channelId/confessions/stats", async (req: any, res: any) => {
   try {
     const { channelId } = req.params;
+    console.log(`[STATS] 통계 요청됨: ${channelId}`);
 
-    // 1. 먼저 channelId로 스트리머의 내부 ID를 찾습니다.
+    // channelId로 스트리머 찾기
     const [streamer] = await (db as any)
       .select({ id: streamersTable.id })
       .from(streamersTable)
@@ -20,11 +23,52 @@ const router = Router();
 
     if (!streamer) return res.status(404).json({ error: "Streamer not found" });
 
-    // 2. 해당 스트리머의 공개된 고민들을 가져옵니다.
+    // 통계 계산 (전체, 승인됨, 대기중)
+    const [stats] = await (db as any)
+      .select({
+        total: sql`COUNT(*)::int`,
+        approved: sql`COUNT(*) FILTER (WHERE ${confessionsTable.verdict} = '승인')::int`,
+        pending: sql`COUNT(*) FILTER (WHERE ${confessionsTable.verdict} = '대기')::int`,
+      })
+      .from(confessionsTable)
+      .where(eq(confessionsTable.streamerId, streamer.id));
+
+    return res.json({
+      total: stats?.total || 0,
+      approved: stats?.approved || 0,
+      pending: stats?.pending || 0,
+    });
+  } catch (err: any) {
+    console.error("[STATS ERROR]:", err.message);
+    return res.status(500).json({ error: "Failed to fetch stats" });
+  }
+});
+
+/**
+ * 2. [GET] 특정 스트리머의 고민 목록 조회
+ * 경로: /api/streamers/:channelId/confessions
+ */
+(router as any).get("/streamers/:channelId/confessions", async (req: any, res: any) => {
+  try {
+    const { channelId } = req.params;
+
+    const [streamer] = await (db as any)
+      .select({ id: streamersTable.id })
+      .from(streamersTable)
+      .where(eq(streamersTable.channelId, channelId))
+      .limit(1);
+
+    if (!streamer) return res.status(404).json({ error: "Streamer not found" });
+
     const rows = await (db as any)
       .select()
       .from(confessionsTable)
-      .where(and(eq(confessionsTable.streamerId, streamer.id), eq(confessionsTable.isPrivate, false)))
+      .where(
+        and(
+          eq(confessionsTable.streamerId, streamer.id),
+          eq(confessionsTable.isPrivate, false)
+        )
+      )
       .orderBy(desc(confessionsTable.createdAt));
 
     return res.json(rows);
@@ -33,32 +77,28 @@ const router = Router();
   }
 });
 
-// [GET] 특정 스트리머의 해결된(답변된) 고민 목록 (추가됨!)
-// 주소: /api/streamers/:channelId/confessions/healed (또는 프론트엔드 요구에 맞춘 경로)
-(router as any).get("/streamers/:channelId/confessions/healed", async (req: any, res: any) => {
+/**
+ * 3. [POST] 고민 작성
+ */
+(router as any).post("/confessions", async (req: any, res: any) => {
   try {
-    const { channelId } = req.params;
-    const [streamer] = await (db as any)
-      .select({ id: streamersTable.id })
-      .from(streamersTable)
-      .where(eq(streamersTable.channelId, channelId))
-      .limit(1);
+    const body = req.body;
+    const [inserted] = await (db as any)
+      .insert(confessionsTable)
+      .values({
+        streamerId: body.streamerId, // 프론트에서 UUID로 보내야 함
+        title: body.title,
+        content: body.content,
+        category: body.category,
+        isPrivate: body.isPrivate ?? false,
+        verdict: "대기",
+        passwordHash: "1234",
+      })
+      .returning();
 
-    if (!streamer) return res.status(404).json({ error: "Streamer not found" });
-
-    const rows = await (db as any)
-      .select()
-      .from(confessionsTable)
-      .where(and(
-        eq(confessionsTable.streamerId, streamer.id),
-        eq(confessionsTable.isPrivate, false),
-        sql`${confessionsTable.answer} IS NOT NULL` // 답변이 있는 것들만
-      ))
-      .orderBy(desc(confessionsTable.createdAt));
-
-    return res.json(rows);
-  } catch (err) {
-    return res.status(500).json({ error: "Failed to fetch healed confessions" });
+    return res.status(201).json(inserted);
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to create" });
   }
 });
 
