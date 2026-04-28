@@ -1,2 +1,2 @@
-export * from "./streamers";
-export * from "./confessions";
+export * from "./streamers.js";
+export * from "./confessions.js";
