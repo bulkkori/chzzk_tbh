@@ -31,17 +31,17 @@ app.use(
 );
 
 app.use(
-  pinoHttp({
+  (pinoHttp as any)({ // 호출 에러 방지를 위해 any 캐스팅
     logger,
     serializers: {
-      req(req) {
+      req(req: any) { // req 타입 명시
         return {
           id: req.id,
           method: req.method,
           url: req.url?.split("?")[0],
         };
       },
-      res(res) {
+      res(res: any) { // res 타입 명시
         return {
           statusCode: res.statusCode,
         };
