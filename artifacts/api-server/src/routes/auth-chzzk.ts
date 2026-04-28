@@ -1,182 +1,212 @@
-import { Router } from "express";
-import cookieParser from "cookie-parser";
-// 1. DB 모듈을 통째로 가져와 any 처리하여 타입 충돌 방지
-import * as dbModule from "@workspace/db";
-const { db, streamersTable } = dbModule as any;
-import { eq } from "drizzle-orm";
-// 2. 로컬 파일 임포트에 .js 확장자 추가 (ESM 규칙)
-import {
-  CHZZK_OAUTH_STATE_COOKIE,
-  ChzzkConfigError,
-  buildAuthorizeUrl,
-  createOAuthState,
-  exchangeCodeForToken,
-  fetchChannelInfo,
-  fetchUserMe,
-  sanitizeReturnTo,
-  verifyOAuthState,
-} from "../lib/chzzk-auth.js";
-import { signStreamerToken } from "../lib/streamer-token.js";
-import { logger } from "../lib/logger.js";
+import crypto from "node:crypto";
+import { logger } from "./logger.js"; // 1. .js 확장자 추가
 
-const router = Router();
+// (중간 주석 생략)
 
-// Express 5 타입 호환성을 위해 (router as any) 사용
-(router as any).use(cookieParser());
+const ACCOUNT_INTERLOCK_URL = "https://chzzk.naver.com/account-interlock";
+const OPEN_API_BASE = "https://openapi.chzzk.naver.com";
 
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: true,
-  sameSite: "lax" as const,
-  maxAge: 10 * 60 * 1000,
-  path: "/api/auth/chzzk",
-};
+const CLIENT_ID = process.env.CHZZK_CLIENT_ID ?? "";
+const CLIENT_SECRET = process.env.CHZZK_CLIENT_SECRET ?? "";
 
-function frontendCallbackUrl(returnTo: string, params: URLSearchParams): string {
-  params.set("returnTo", returnTo);
-  return `/auth/callback#${params.toString()}`;
+const STATE_SECRET =
+  process.env.CHZZK_STATE_SECRET ??
+  process.env.STREAMER_TOKEN_SECRET ??
+  "dev-state-secret-change-me";
+
+const STATE_TTL_SECONDS = 10 * 60;
+
+export class ChzzkConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ChzzkConfigError";
+  }
 }
 
-// GET /api/auth/chzzk/start
-(router as any).get("/auth/chzzk/start", (req: any, res: any) => {
-  try {
-    const returnTo = sanitizeReturnTo(
-      typeof req.query.returnTo === "string" ? req.query.returnTo : "/",
+export function assertChzzkConfigured(): void {
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    throw new ChzzkConfigError(
+      "치지직 OAuth 설정이 되어 있지 않아요. CHZZK_CLIENT_ID와 CHZZK_CLIENT_SECRET 시크릿을 설정해 주세요.",
     );
-    const { nonce, cookie } = createOAuthState(returnTo);
-    res.cookie(CHZZK_OAUTH_STATE_COOKIE, cookie, COOKIE_OPTIONS);
-    return res.redirect(302, buildAuthorizeUrl(nonce));
-  } catch (err: any) { // err: any 처리
-    if (err instanceof ChzzkConfigError) {
-      logger.error({ err }, "chzzk oauth not configured");
-      return res
-        .status(500)
-        .send(`<pre>${escapeHtml(err.message)}</pre>`);
-    }
-    logger.error({ err }, "chzzk oauth start failed");
-    return res
-      .status(500)
-      .send("<pre>치지직 로그인을 시작하지 못했어요.</pre>");
   }
-});
+}
 
-// GET /api/auth/chzzk/callback
-(router as any).get("/auth/chzzk/callback", async (req: any, res: any) => {
-  const code = typeof req.query.code === "string" ? req.query.code : "";
-  const state = typeof req.query.state === "string" ? req.query.state : "";
-  const cookieValue = req.cookies?.[CHZZK_OAUTH_STATE_COOKIE];
+export function getRedirectUri(): string {
+  const uri = process.env.CHZZK_REDIRECT_URI;
+  if (!uri) {
+    throw new ChzzkConfigError(
+      "CHZZK_REDIRECT_URI 환경변수를 설정해 주세요.",
+    );
+  }
+  return uri;
+}
 
-  res.clearCookie(CHZZK_OAUTH_STATE_COOKIE, { path: COOKIE_OPTIONS.path });
+function hmac(payload: string): string {
+  return crypto.createHmac("sha256", STATE_SECRET).update(payload).digest("hex");
+}
 
-  const verified = verifyOAuthState(cookieValue, state);
-  if (!code || !state || !verified) {
+export interface OAuthStatePayload {
+  nonce: string;
+  returnTo: string;
+  exp: number;
+}
+
+export function createOAuthState(returnTo: string): {
+  nonce: string;
+  cookie: string;
+} {
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const exp = Math.floor(Date.now() / 1000) + STATE_TTL_SECONDS;
+  const safeReturn = sanitizeReturnTo(returnTo);
+  const payload = JSON.stringify({ nonce, returnTo: safeReturn, exp });
+  const encoded = Buffer.from(payload, "utf8").toString("base64url");
+  const sig = hmac(encoded);
+  return { nonce, cookie: `${encoded}.${sig}` };
+}
+
+export function verifyOAuthState(
+  cookieValue: string | undefined,
+  expectedNonce: string,
+): OAuthStatePayload | null {
+  if (!cookieValue || typeof cookieValue !== "string") return null;
+  const lastDot = cookieValue.lastIndexOf(".");
+  if (lastDot <= 0) return null;
+  const encoded = cookieValue.slice(0, lastDot);
+  const sig = cookieValue.slice(lastDot + 1);
+  const expected = hmac(encoded);
+  if (sig.length !== expected.length) return null;
+  try {
+    if (
+      !crypto.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"))
+    ) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  let payload: OAuthStatePayload;
+  try {
+    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!payload || typeof payload.nonce !== "string") return null;
+  if (payload.nonce !== expectedNonce) return null;
+  if (typeof payload.exp !== "number" || Math.floor(Date.now() / 1000) > payload.exp) {
+    return null;
+  }
+  return payload;
+}
+
+function sanitizeReturnTo(input: string | undefined | null): string {
+  if (!input) return "/";
+  if (typeof input !== "string") return "/";
+  if (!input.startsWith("/") || input.startsWith("//")) return "/";
+  return input.split("#")[0] || "/";
+}
+
+export { sanitizeReturnTo };
+
+export function buildAuthorizeUrl(nonce: string): string {
+  assertChzzkConfigured();
+  const params = new URLSearchParams({
+    clientId: CLIENT_ID,
+    redirectUri: getRedirectUri(),
+    state: nonce,
+  });
+  return `${ACCOUNT_INTERLOCK_URL}?${params.toString()}`;
+}
+
+interface TokenResponse {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: string | number;
+}
+
+export async function exchangeCodeForToken(
+  code: string,
+  state: string,
+): Promise<TokenResponse> {
+  assertChzzkConfigured();
+  // 2. fetch 결과(Response)를 any로 캐스팅하여 타입 에러 방지
+  const res: any = await fetch(`${OPEN_API_BASE}/auth/v1/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      grantType: "authorization_code",
+      clientId: CLIENT_ID,
+      clientSecret: CLIENT_SECRET,
+      code,
+      state,
+    }),
+  });
+  const json = (await res.json().catch(() => null)) as any;
+  if (!res.ok || !json || !json.content?.accessToken) {
     logger.warn(
-      { hasCode: !!code, hasState: !!state, hasCookie: !!cookieValue },
-      "chzzk oauth callback failed state check",
+      { status: res.status, body: json },
+      "chzzk token exchange failed",
     );
-    return res.redirect(
-      302,
-      frontendCallbackUrl(
-        "/",
-        new URLSearchParams({
-          error: "치지직 로그인 요청이 만료되었거나 유효하지 않아요. 다시 시도해 주세요.",
-        }),
-      ),
+    throw new Error(
+      json?.message ?? "치지직 토큰 발급에 실패했어요.",
     );
   }
-
-  try {
-    const tokenRes = await exchangeCodeForToken(code, state);
-    const me = await fetchUserMe(tokenRes.accessToken);
-
-    // 허용된 채널 ID 체크 (운영자 계정 등)
-    const ALLOWED_CHANNEL_IDS = ["6ab86891e07489743437594c6e4dbf3a"];
-    if (!ALLOWED_CHANNEL_IDS.includes(me.channelId)) {
-      return res.redirect(
-        302,
-        frontendCallbackUrl(
-          "/",
-          new URLSearchParams({
-            error: "현재 신규 등록은 준비 중입니다.",
-          }),
-        ),
-      );
-    }
-
-    const channel = await fetchChannelInfo(me.channelId);
-    const displayName = channel?.channelName || me.channelName;
-    const profileImageUrl = channel?.channelImageUrl ?? null;
-
-    // DB 쿼리 시 (db as any)를 사용하여 타입 불일치 해결
-    const [existing] = await (db as any)
-      .select()
-      .from(streamersTable)
-      .where(eq(streamersTable.channelId, me.channelId))
-      .limit(1);
-
-    let streamer;
-    if (!existing) {
-      const [created] = await (db as any)
-        .insert(streamersTable)
-        .values({
-          channelId: me.channelId,
-          name: displayName,
-          profileImageUrl,
-        })
-        .returning();
-      streamer = created;
-    } else {
-      const shouldUpdate =
-        existing.name !== displayName ||
-        existing.profileImageUrl !== profileImageUrl;
-      if (shouldUpdate) {
-        const [updated] = await (db as any)
-          .update(streamersTable)
-          .set({ name: displayName, profileImageUrl })
-          .where(eq(streamersTable.id, existing.id))
-          .returning();
-        streamer = updated;
-      } else {
-        streamer = existing;
-      }
-    }
-
-    const adminToken = signStreamerToken(streamer.id);
-
-    return res.redirect(
-      302,
-      frontendCallbackUrl(
-        verified.returnTo,
-        new URLSearchParams({
-          token: adminToken,
-          channelId: streamer.channelId,
-          streamerName: streamer.name,
-          nickname: me.channelName,
-          hasCredentials: streamer.username && streamer.passwordHash ? "1" : "0",
-          isNew: existing ? "0" : "1",
-        }),
-      ),
-    );
-  } catch (err: any) {
-    logger.error({ err }, "chzzk oauth callback failed");
-    const message = err instanceof Error ? err.message : "치지직 로그인 처리 중 문제가 생겼어요.";
-    return res.redirect(
-      302,
-      frontendCallbackUrl(
-        verified.returnTo,
-        new URLSearchParams({ error: message }),
-      ),
-    );
-  }
-});
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+  return json.content;
 }
 
-export default router;
+export interface ChzzkUser {
+  channelId: string;
+  channelName: string;
+}
+
+export async function fetchUserMe(accessToken: string): Promise<ChzzkUser> {
+  const res: any = await fetch(`${OPEN_API_BASE}/open/v1/users/me`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+    },
+  });
+  const json = (await res.json().catch(() => null)) as any;
+  if (!res.ok || !json?.content?.channelId) {
+    logger.warn({ status: res.status, body: json }, "chzzk users/me failed");
+    throw new Error(json?.message ?? "치지직 유저 정보를 불러오지 못했어요.");
+  }
+  return json.content;
+}
+
+export interface ChzzkChannel {
+  channelId: string;
+  channelName: string;
+  channelImageUrl: string | null;
+}
+
+export async function fetchChannelInfo(
+  channelId: string,
+): Promise<ChzzkChannel | null> {
+  if (!CLIENT_ID || !CLIENT_SECRET) return null;
+  try {
+    const url = new URL(`${OPEN_API_BASE}/open/v1/channels`);
+    url.searchParams.set("channelIds", channelId);
+    const res: any = await fetch(url.toString(), {
+      headers: {
+        "Client-Id": CLIENT_ID,
+        "Client-Secret": CLIENT_SECRET,
+        Accept: "application/json",
+      },
+    });
+    const json = (await res.json().catch(() => null)) as any;
+    if (!res.ok || !json?.content?.data?.length) {
+      logger.warn({ status: res.status, body: json, channelId }, "chzzk channels lookup failed");
+      return null;
+    }
+    return json.content.data[0];
+  } catch (err) {
+    logger.warn({ err, channelId }, "chzzk channels lookup threw");
+    return null;
+  }
+}
+
+export const CHZZK_OAUTH_STATE_COOKIE = "chzzk_oauth_state";
