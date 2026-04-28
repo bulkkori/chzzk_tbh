@@ -1,6 +1,6 @@
 import { Router } from "express";
 // @workspace/db 대신 실제 파일이 있는 상대 경로로 변경합니다.
-import * as dbModule from "../../../lib/db/src/index.js"; 
+import * as dbModule from "@workspace/db";
 const { db, streamersTable, confessionsTable } = dbModule as any;
 import { eq, sql, desc } from "drizzle-orm";
 
