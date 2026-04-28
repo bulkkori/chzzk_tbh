@@ -5,25 +5,27 @@ import * as schema from "./schema/index.js";
 const { Pool } = pg;
 
 if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL 환경 변수가 설정되지 않았습니다.");
+  throw new Error("DATABASE_URL 환경 변수가 없습니다.");
 }
 
-// Vercel 환경에서 DB 연결 안정성을 높이는 설정
-export const pool = new Pool({
+// 연결 옵션을 객체로 명확히 분리
+const poolConfig = {
   connectionString: process.env.DATABASE_URL,
-  max: 10,
+  max: 1, // 서버리스 환경에서는 커넥션을 적게 유지하는 것이 안전합니다.
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000, // 5초 이내에 연결 안 되면 에러 발생
+  connectionTimeoutMillis: 10000,
   ssl: {
-    // Vercel에서 자가 서명 인증서를 사용하는 DB(대부분의 클라우드 DB)에 접속할 때 필수
-    rejectUnauthorized: false,
+    rejectUnauthorized: false, // SSL 인증서 검증 건너뛰기 (대부분의 클라우드 DB 필수)
   },
-});
+};
 
-// 에러 발생 시 로그를 남겨서 디버깅을 돕습니다.
+export const pool = new Pool(poolConfig);
+
+// 연결 에러 핸들링
 pool.on("error", (err) => {
-  console.error("[DB Pool Error] 예기치 못한 DB 연결 오류:", err);
+  console.error("[DB Pool] 연결 중 치명적 에러:", err);
 });
 
 export const db = drizzle(pool, { schema });
+
 export * from "./schema/index.js";
