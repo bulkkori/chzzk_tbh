@@ -1,4 +1,5 @@
-export * from "./generated/api";
+// [중요] 상대 경로 임포트 시 .js 확장자 추가
+export * from "./generated/api.js"; 
 export type {
   AnswerConfessionInput,
   Category,
@@ -20,5 +21,6 @@ export type {
   UploadUrlResponse,
   Verdict,
   VerdictInput,
-} from "./generated/types";
-export type { GetConfessionParams as GetConfessionQueryStringParams } from "./generated/types";
+} from "./generated/types/index.js"; // 폴더 내부의 index.js 명시
+
+export type { GetConfessionParams as GetConfessionQueryStringParams } from "./generated/types/index.js";
