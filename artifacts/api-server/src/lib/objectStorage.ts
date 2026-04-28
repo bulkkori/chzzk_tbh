@@ -7,7 +7,7 @@ import {
   canAccessObject,
   getObjectAclPolicy,
   setObjectAclPolicy,
-} from "./objectAcl";
+} from "./objectAcl.js"; // 1. .js 확장자 추가
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
@@ -87,7 +87,7 @@ export class ObjectStorageService {
     return null;
   }
 
-  async downloadObject(file: File, cacheTtlSec: number = 3600): Promise<Response> {
+  async downloadObject(file: File, cacheTtlSec: number = 3600): Promise<any> {
     const [metadata] = await file.getMetadata();
     const aclPolicy = await getObjectAclPolicy(file);
     const isPublic = aclPolicy?.visibility === "public";
@@ -103,16 +103,14 @@ export class ObjectStorageService {
       headers["Content-Length"] = String(metadata.size);
     }
 
-    return new Response(webStream, { headers });
+    // Response 타입을 any로 우회하여 타입 충돌 방지
+    return new (Response as any)(webStream, { headers });
   }
 
   async getObjectEntityUploadURL(): Promise<string> {
     const privateObjectDir = this.getPrivateObjectDir();
     if (!privateObjectDir) {
-      throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
-      );
+      throw new Error("PRIVATE_OBJECT_DIR not set.");
     }
 
     const objectId = randomUUID();
@@ -244,7 +242,9 @@ async function signObjectURL({
     method,
     expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
   };
-  const response = await fetch(
+
+  // 2. fetch 결과(Response)를 any로 캐스팅하여 속성 인식 에러 해결
+  const response: any = await fetch(
     `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
     {
       method: "POST",
@@ -252,13 +252,13 @@ async function signObjectURL({
         "Content-Type": "application/json",
       },
       body: JSON.stringify(request),
-      signal: AbortSignal.timeout(30_000),
+      signal: (AbortSignal as any).timeout(30_000),
     }
   );
+
   if (!response.ok) {
     throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
+      `Failed to sign object URL, errorcode: ${response.status}`
     );
   }
 
