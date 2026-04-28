@@ -81,7 +81,6 @@ const router = Router();
 (router as any).get("/streamers/:channelId/confessions/:confessionId", async (req: any, res: any) => {
   try {
     const { confessionId } = req.params;
-    console.log(`[DETAIL] 조회 ID: ${confessionId}`);
 
     const [confession] = await (db as any)
       .select()
@@ -93,14 +92,23 @@ const router = Router();
       return res.status(404).json({ error: "게시글을 찾을 수 없습니다." });
     }
 
-    return res.json(confession);
-  } catch (err: any) {
-    console.error("[상세조회 에러]:", err.message);
-    return res.status(500).json({ 
-      error: "상세 정보 조회 실패", 
-      message: err.message, // 진짜 이유가 여기에 찍힙니다.
-      idSent: req.params.confessionId 
+    // 데이터를 그냥 주는 게 아니라, 프론트엔드에서 흔히 쓰는 필드명으로 한 번 더 정리해줍니다.
+    // 만약 프론트엔드가 data.content 이런 식으로 접근한다면 아래 구조가 필요합니다.
+    return res.json({
+      ...confession,
+      // 프론트엔드 스키마와 DB 컬럼명이 다를 경우를 대비해 매핑
+      id: confession.id,
+      streamerId: confession.streamerId,
+      title: confession.title,
+      content: confession.content,
+      category: confession.category,
+      answer: confession.answer,
+      isPrivate: confession.isPrivate,
+      verdict: confession.verdict,
+      createdAt: confession.createdAt,
     });
+  } catch (err: any) {
+    return res.status(500).json({ error: "상세 정보 조회 실패", message: err.message });
   }
 });
 
