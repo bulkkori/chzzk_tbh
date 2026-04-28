@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import * as schema from "./schema";
+// [중요] 폴더 임포트 시 /index.js 명시
+import * as schema from "./schema/index.js"; 
 
 const { Pool } = pg;
 
@@ -12,11 +13,9 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Vercel Serverless 환경 최적화: 연결 수 최소화
   max: 1,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
-  // Vercel Postgres(Neon) 사용 시 SSL 필요
   ssl: process.env.NODE_ENV === "production"
     ? { rejectUnauthorized: false }
     : false,
@@ -24,4 +23,5 @@ export const pool = new Pool({
 
 export const db = drizzle(pool, { schema });
 
-export * from "./schema";
+// [중요] 다시 내보낼 때도 /index.js 명시
+export * from "./schema/index.js";
