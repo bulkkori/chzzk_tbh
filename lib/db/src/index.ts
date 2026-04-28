@@ -1,27 +1,30 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import pg from "pg";
-import * as schema from "./schema/index.js";
+import { pgTable, uuid, text, boolean, timestamp } from "drizzle-orm/pg-core";
 
-const { Pool } = pg;
-
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is missing");
-}
-
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  // Neon 풀러(PgBouncer) 사용 시 필수 설정
-  ssl: {
-    rejectUnauthorized: false,
-  },
-  max: 1, // 서버리스 환경에서는 1로 설정하는 것이 가장 안정적입니다.
-  connectionTimeoutMillis: 5000,
-  idleTimeoutMillis: 30000,
+// 스트리머 테이블 정의
+export const streamersTable = pgTable("streamers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  channelId: text("channel_id").unique().notNull(),
+  name: text("name").notNull(),
+  profileImageUrl: text("profile_image_url"),
+  username: text("username"),
+  passwordHash: text("password_hash"), // 스트리머 로그인용
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-pool.on("error", (err) => {
-  console.error("[DB Pool] Unexpected error on idle client", err);
+// 고민(Confessions) 테이블 정의
+export const confessionsTable = pgTable("confessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  streamerId: uuid("streamer_id").references(() => streamersTable.id).notNull(),
+  title: text("title"),
+  content: text("content").notNull(),
+  category: text("category"),
+  answer: text("answer"),
+  isPrivate: boolean("is_private").default(false).notNull(),
+  verdict: text("verdict").default("대기").notNull(), // '대기', '승인', '거절'
+  
+  // ★ 이 줄이 핵심입니다. 이게 있어야 SQL에 포함됩니다.
+  passwordHash: text("password_hash"), 
+  
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  answeredAt: timestamp("answered_at"),
 });
-
-export const db = drizzle(pool, { schema });
-export * from "./schema/index.js";
