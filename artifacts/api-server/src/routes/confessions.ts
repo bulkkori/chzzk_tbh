@@ -6,7 +6,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 const router = Router();
 
 /**
- * 1. [GET] 특정 스트리머의 고민 통계 데이터 (치유됨 카운트 추가)
+ * 1. [GET] 특정 스트리머의 고민 통계 데이터 (치유됨 카운트 로직 보강)
  */
 (router as any).get("/streamers/:channelId/confessions/stats", async (req: any, res: any) => {
   try {
@@ -19,13 +19,14 @@ const router = Router();
 
     if (!streamer) return res.status(404).json({ error: "Streamer not found" });
 
+    // FILTER 대신 CASE WHEN을 사용하여 모든 환경에서 더 안정적으로 카운트합니다.
     const [stats] = await (db as any)
       .select({
         total: sql`COUNT(*)::int`,
-        approved: sql`COUNT(*) FILTER (WHERE ${confessionsTable.verdict} = '승인')::int`,
-        pending: sql`COUNT(*) FILTER (WHERE ${confessionsTable.verdict} = '대기')::int`,
-        // 스트리머가 답변(answer)을 남긴 고민이 '치유됨'입니다.
-        healed: sql`COUNT(*) FILTER (WHERE ${confessionsTable.answer} IS NOT NULL)::int`,
+        approved: sql`COUNT(CASE WHEN ${confessionsTable.verdict} = '승인' THEN 1 END)::int`,
+        pending: sql`COUNT(CASE WHEN ${confessionsTable.verdict} = '대기' THEN 1 END)::int`,
+        // 답변(answer)이 있는 글만 '치유됨'으로 카운트
+        healed: sql`COUNT(CASE WHEN ${confessionsTable.answer} IS NOT NULL AND ${confessionsTable.answer} <> '' THEN 1 END)::int`,
       })
       .from(confessionsTable)
       .where(eq(confessionsTable.streamerId, streamer.id));
@@ -34,39 +35,15 @@ const router = Router();
       total: stats?.total || 0,
       approved: stats?.approved || 0,
       pending: stats?.pending || 0,
-      healed: stats?.healed || 0, // 치유됨 필드 추가
+      healed: stats?.healed || 0,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: "Failed to fetch stats" });
+    return res.status(500).json({ error: "Stats fetch error", message: err.message });
   }
 });
 
 /**
- * 2. [GET] 특정 게시글 상세 조회 (404 에러 해결용!!)
- * 경로: /api/streamers/:channelId/confessions/:confessionId
- */
-(router as any).get("/streamers/:channelId/confessions/:confessionId", async (req: any, res: any) => {
-  try {
-    const { confessionId } = req.params;
-    
-    const [confession] = await (db as any)
-      .select()
-      .from(confessionsTable)
-      .where(eq(confessionsTable.id, confessionId))
-      .limit(1);
-
-    if (!confession) {
-      return res.status(404).json({ error: "게시글을 찾을 수 없습니다." });
-    }
-
-    return res.json(confession);
-  } catch (err: any) {
-    return res.status(500).json({ error: "상세 정보 조회 실패" });
-  }
-});
-
-/**
- * 3. [GET] 해결된(치유됨) 고민 목록 조회
+ * 2. [GET] 해결된(치유됨) 고민 목록 조회
  */
 (router as any).get("/streamers/:channelId/confessions/healed", async (req: any, res: any) => {
   try {
@@ -86,14 +63,44 @@ const router = Router();
         and(
           eq(confessionsTable.streamerId, streamer.id),
           eq(confessionsTable.isPrivate, false),
-          sql`${confessionsTable.answer} IS NOT NULL`
+          sql`${confessionsTable.answer} IS NOT NULL AND ${confessionsTable.answer} <> ''`
         )
       )
       .orderBy(desc(confessionsTable.createdAt));
 
     return res.json(rows);
   } catch (err: any) {
-    return res.status(500).json({ error: "Failed" });
+    return res.status(500).json({ error: "Healed fetch error", message: err.message });
+  }
+});
+
+/**
+ * 3. [GET] 특정 게시글 상세 조회 (에러 추적 강화)
+ * ★ 경로 순서가 중요합니다. stats와 healed 뒤에 와야 합니다.
+ */
+(router as any).get("/streamers/:channelId/confessions/:confessionId", async (req: any, res: any) => {
+  try {
+    const { confessionId } = req.params;
+    console.log(`[DETAIL] 조회 ID: ${confessionId}`);
+
+    const [confession] = await (db as any)
+      .select()
+      .from(confessionsTable)
+      .where(eq(confessionsTable.id, confessionId))
+      .limit(1);
+
+    if (!confession) {
+      return res.status(404).json({ error: "게시글을 찾을 수 없습니다." });
+    }
+
+    return res.json(confession);
+  } catch (err: any) {
+    console.error("[상세조회 에러]:", err.message);
+    return res.status(500).json({ 
+      error: "상세 정보 조회 실패", 
+      message: err.message, // 진짜 이유가 여기에 찍힙니다.
+      idSent: req.params.confessionId 
+    });
   }
 });
 
@@ -124,7 +131,7 @@ const router = Router();
 
     return res.json(rows);
   } catch (err: any) {
-    return res.status(500).json({ error: "Failed" });
+    return res.status(500).json({ error: "Fetch error", message: err.message });
   }
 });
 
@@ -159,7 +166,7 @@ const router = Router();
 
     return res.status(201).json(inserted);
   } catch (err: any) {
-    return res.status(500).json({ error: "DB_ERROR", message: err.message });
+    return res.status(500).json({ error: "Create error", message: err.message });
   }
 });
 
