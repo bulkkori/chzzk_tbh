@@ -7,7 +7,6 @@ const router = Router();
 
 /**
  * 1. [GET] 특정 스트리머의 고민 통계 데이터
- * 경로: /api/streamers/:channelId/confessions/stats
  */
 (router as any).get("/streamers/:channelId/confessions/stats", async (req: any, res: any) => {
   try {
@@ -40,8 +39,7 @@ const router = Router();
 });
 
 /**
- * 2. [GET] 해결된(답변 완료된) 고민 목록 조회
- * 경로: /api/streamers/:channelId/confessions/healed
+ * 2. [GET] 해결된 고민 목록 조회
  */
 (router as any).get("/streamers/:channelId/confessions/healed", async (req: any, res: any) => {
   try {
@@ -74,7 +72,6 @@ const router = Router();
 
 /**
  * 3. [GET] 특정 스트리머의 고민 목록 전체 조회
- * 경로: /api/streamers/:channelId/confessions
  */
 (router as any).get("/streamers/:channelId/confessions", async (req: any, res: any) => {
   try {
@@ -105,7 +102,7 @@ const router = Router();
 });
 
 /**
- * 4. [POST] 고민 작성 (비밀번호 및 상세 에러 로직 포함)
+ * 4. [POST] 고민 작성 (비밀번호 필수 포함 버전)
  * 경로: /api/streamers/:channelId/confessions
  */
 (router as any).post("/streamers/:channelId/confessions", async (req: any, res: any) => {
@@ -113,6 +110,7 @@ const router = Router();
     const { channelId } = req.params;
     const { title, content, category, isPrivate, password } = req.body;
 
+    // 1. 스트리머 찾기
     const [streamer] = await (db as any)
       .select({ id: streamersTable.id })
       .from(streamersTable)
@@ -121,7 +119,7 @@ const router = Router();
 
     if (!streamer) return res.status(404).json({ error: "Streamer not found" });
 
-    // DB에 값을 넣을 때 passwordHash를 명시적으로 포함합니다.
+    // 2. DB 저장 (passwordHash를 반드시 포함해야 500 에러가 안 납니다!)
     const [inserted] = await (db as any)
       .insert(confessionsTable)
       .values({
@@ -131,7 +129,7 @@ const router = Router();
         category: category || "기타",
         isPrivate: isPrivate ?? false,
         verdict: "대기", 
-        // 중요: DB 스키마에 passwordHash가 정의되어 있어야 합니다.
+        // ★ 이 부분이 빠지면 DB가 거부합니다.
         passwordHash: password || "1234", 
       })
       .returning();
@@ -139,11 +137,12 @@ const router = Router();
     return res.status(201).json(inserted);
 
   } catch (err: any) {
-    console.error("!!! DB INSERT ERROR !!!", err.message);
+    console.error("!!! DB INSERT ERROR 상세 사유 !!!");
+    console.error(err.message);
     return res.status(500).json({ 
       error: "DB_ERROR", 
       message: err.message,
-      detail: err.detail, // Postgres의 상세 에러 원인 (ex: null value violates constraint)
+      detail: err.detail // Postgres가 직접 알려주는 원인
     });
   }
 });
