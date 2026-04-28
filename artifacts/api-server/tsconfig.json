@@ -2,10 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    // "rootDir": "src",  <-- 이 줄을 삭제하거나 주석 처리하세요.
     "types": ["node"]
+    // "rootDir": "src" -> 이 줄을 삭제하거나 주석 처리하세요.
   },
-  "include": ["src", "api"], // "api" 추가
+  "include": ["src", "api"], // "api" 폴더를 추가합니다.
   "references": [
     { "path": "../../lib/db" },
     { "path": "../../lib/api-zod" }
