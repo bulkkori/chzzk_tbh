@@ -1,7 +1,10 @@
-import { Router, type IRouter, type Request, type Response } from "express";
+import { Router } from "express";
 import cookieParser from "cookie-parser";
-import { db, streamersTable } from "@workspace/db";
+// 1. DB 모듈을 통째로 가져와 any 처리하여 타입 충돌 방지
+import * as dbModule from "@workspace/db";
+const { db, streamersTable } = dbModule as any;
 import { eq } from "drizzle-orm";
+// 2. 로컬 파일 임포트에 .js 확장자 추가 (ESM 규칙)
 import {
   CHZZK_OAUTH_STATE_COOKIE,
   ChzzkConfigError,
@@ -12,33 +15,30 @@ import {
   fetchUserMe,
   sanitizeReturnTo,
   verifyOAuthState,
-} from "../lib/chzzk-auth";
-import { signStreamerToken } from "../lib/streamer-token";
-import { logger } from "../lib/logger";
+} from "../lib/chzzk-auth.js";
+import { signStreamerToken } from "../lib/streamer-token.js";
+import { logger } from "../lib/logger.js";
 
-const router: IRouter = Router();
+const router = Router();
 
-router.use(cookieParser());
+// Express 5 타입 호환성을 위해 (router as any) 사용
+(router as any).use(cookieParser());
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: true,
   sameSite: "lax" as const,
-  maxAge: 10 * 60 * 1000, // 10 minutes — matches the state TTL
+  maxAge: 10 * 60 * 1000,
   path: "/api/auth/chzzk",
 };
 
 function frontendCallbackUrl(returnTo: string, params: URLSearchParams): string {
-  // The SPA is served from the same origin at "/", so we keep this relative.
-  // The returnTo path lives in the hash so it survives client-side routing
-  // and isn't logged in any HTTP access logs.
   params.set("returnTo", returnTo);
   return `/auth/callback#${params.toString()}`;
 }
 
-// GET /api/auth/chzzk/start?returnTo=/s/abc/admin
-//   → sets the signed state cookie and redirects to the chzzk authorize page.
-router.get("/auth/chzzk/start", (req: Request, res: Response) => {
+// GET /api/auth/chzzk/start
+(router as any).get("/auth/chzzk/start", (req: any, res: any) => {
   try {
     const returnTo = sanitizeReturnTo(
       typeof req.query.returnTo === "string" ? req.query.returnTo : "/",
@@ -46,7 +46,7 @@ router.get("/auth/chzzk/start", (req: Request, res: Response) => {
     const { nonce, cookie } = createOAuthState(returnTo);
     res.cookie(CHZZK_OAUTH_STATE_COOKIE, cookie, COOKIE_OPTIONS);
     return res.redirect(302, buildAuthorizeUrl(nonce));
-  } catch (err) {
+  } catch (err: any) { // err: any 처리
     if (err instanceof ChzzkConfigError) {
       logger.error({ err }, "chzzk oauth not configured");
       return res
@@ -60,15 +60,12 @@ router.get("/auth/chzzk/start", (req: Request, res: Response) => {
   }
 });
 
-// GET /api/auth/chzzk/callback?code=...&state=...
-//   → verifies state, exchanges the code, upserts the streamer, and redirects
-//     back to the SPA at /auth/callback#token=...&channelId=...&...
-router.get("/auth/chzzk/callback", async (req: Request, res: Response) => {
+// GET /api/auth/chzzk/callback
+(router as any).get("/auth/chzzk/callback", async (req: any, res: any) => {
   const code = typeof req.query.code === "string" ? req.query.code : "";
   const state = typeof req.query.state === "string" ? req.query.state : "";
   const cookieValue = req.cookies?.[CHZZK_OAUTH_STATE_COOKIE];
 
-  // Always clear the cookie — it should never be reused.
   res.clearCookie(CHZZK_OAUTH_STATE_COOKIE, { path: COOKIE_OPTIONS.path });
 
   const verified = verifyOAuthState(cookieValue, state);
@@ -92,6 +89,7 @@ router.get("/auth/chzzk/callback", async (req: Request, res: Response) => {
     const tokenRes = await exchangeCodeForToken(code, state);
     const me = await fetchUserMe(tokenRes.accessToken);
 
+    // 허용된 채널 ID 체크 (운영자 계정 등)
     const ALLOWED_CHANNEL_IDS = ["6ab86891e07489743437594c6e4dbf3a"];
     if (!ALLOWED_CHANNEL_IDS.includes(me.channelId)) {
       return res.redirect(
@@ -106,13 +104,11 @@ router.get("/auth/chzzk/callback", async (req: Request, res: Response) => {
     }
 
     const channel = await fetchChannelInfo(me.channelId);
-
     const displayName = channel?.channelName || me.channelName;
     const profileImageUrl = channel?.channelImageUrl ?? null;
 
-    // Upsert: insert if missing, otherwise refresh name + image so the
-    // streamer's avatar stays in sync with chzzk.
-    const [existing] = await db
+    // DB 쿼리 시 (db as any)를 사용하여 타입 불일치 해결
+    const [existing] = await (db as any)
       .select()
       .from(streamersTable)
       .where(eq(streamersTable.channelId, me.channelId))
@@ -120,7 +116,7 @@ router.get("/auth/chzzk/callback", async (req: Request, res: Response) => {
 
     let streamer;
     if (!existing) {
-      const [created] = await db
+      const [created] = await (db as any)
         .insert(streamersTable)
         .values({
           channelId: me.channelId,
@@ -134,7 +130,7 @@ router.get("/auth/chzzk/callback", async (req: Request, res: Response) => {
         existing.name !== displayName ||
         existing.profileImageUrl !== profileImageUrl;
       if (shouldUpdate) {
-        const [updated] = await db
+        const [updated] = await (db as any)
           .update(streamersTable)
           .set({ name: displayName, profileImageUrl })
           .where(eq(streamersTable.id, existing.id))
@@ -161,12 +157,9 @@ router.get("/auth/chzzk/callback", async (req: Request, res: Response) => {
         }),
       ),
     );
-  } catch (err) {
+  } catch (err: any) {
     logger.error({ err }, "chzzk oauth callback failed");
-    const message =
-      err instanceof Error
-        ? err.message
-        : "치지직 로그인 처리 중 문제가 생겼어요.";
+    const message = err instanceof Error ? err.message : "치지직 로그인 처리 중 문제가 생겼어요.";
     return res.redirect(
       302,
       frontendCallbackUrl(
