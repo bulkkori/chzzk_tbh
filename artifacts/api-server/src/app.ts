@@ -6,7 +6,8 @@ import pinoHttp from "pino-http";
 import router from "./routes/index.js"; // 폴더인 경우 index.js까지 명시 권장
 import { logger } from "./lib/logger.js";
 
-const app: Express = express();
+const app = express(); // : Express 타입을 제거하거나 any로 우회합니다.
+(app as any).set("trust proxy", 1);
 
 app.set("trust proxy", 1);
 
