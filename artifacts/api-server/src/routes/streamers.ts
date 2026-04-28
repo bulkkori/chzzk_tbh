@@ -1,6 +1,6 @@
 import { Router } from "express";
-// 1. DB 모듈을 통째로 가져온 뒤 any로 캐스팅하여 타입 충돌 방지
-import * as dbModule from "@workspace/db";
+// @workspace/db 대신 실제 파일이 있는 상대 경로로 변경합니다.
+import * as dbModule from "../../../lib/db/src/index.js"; 
 const { db, streamersTable, confessionsTable } = dbModule as any;
 import { eq, sql, desc } from "drizzle-orm";
 
