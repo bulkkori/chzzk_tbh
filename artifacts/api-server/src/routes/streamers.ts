@@ -5,22 +5,9 @@ import { eq, sql, desc } from "drizzle-orm";
 
 const router = Router();
 
-function toSummary(row: any) {
-  return {
-    id: row.id,
-    channelId: row.channelId,
-    name: row.name,
-    profileImageUrl: row.profileImageUrl,
-    confessionCount: Number(row.confessionCount || 0),
-    hasCredentials: !!row.username && !!row.passwordHash,
-    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
-  };
-}
-
+// [GET] 전체 스트리머 목록 (이미 성공한 코드)
 (router as any).get("/streamers", async (_req: any, res: any) => {
   try {
-    console.log("[API] 스트리머 목록 조회 시도 (Strict GroupBy Version)");
-    
     const rows = await (db as any)
       .select({
         id: streamersTable.id,
@@ -30,32 +17,34 @@ function toSummary(row: any) {
         username: streamersTable.username,
         passwordHash: streamersTable.passwordHash,
         createdAt: streamersTable.createdAt,
-        // Neon에서 가장 안전한 CASE WHEN 방식으로 카운트
         confessionCount: (sql as any)`CAST(COUNT(CASE WHEN ${confessionsTable.isPrivate} = false THEN 1 END) AS INTEGER)`,
       })
       .from(streamersTable)
       .leftJoin(confessionsTable, eq(confessionsTable.streamerId, streamersTable.id))
-      // ★ 중요: select한 모든 컬럼을 group 시켜야 PostgreSQL 에러가 안 납니다.
-      .groupBy(
-        streamersTable.id,
-        streamersTable.channelId,
-        streamersTable.name,
-        streamersTable.profileImageUrl,
-        streamersTable.username,
-        streamersTable.passwordHash,
-        streamersTable.createdAt
-      )
+      .groupBy(streamersTable.id, streamersTable.channelId, streamersTable.name, streamersTable.profileImageUrl, streamersTable.username, streamersTable.passwordHash, streamersTable.createdAt)
       .orderBy(desc(streamersTable.createdAt));
       
-    console.log(`[API] 조회 성공: ${rows.length}건`);
-    return res.json(rows.map((r: any) => toSummary(r)));
-
+    return res.json(rows);
   } catch (e: any) {
-    console.error("[API 에러 상세]:", e.message);
-    return res.status(500).json({ 
-      error: "Internal Server Error", 
-      message: e.message 
-    });
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// [GET] 특정 스트리머 상세 정보 (추가됨!)
+// 프론트엔드가 호출하는 주소: /api/streamers/6ab86891e07489743437594c6e4dbf3a
+(router as any).get("/streamers/:channelId", async (req: any, res: any) => {
+  try {
+    const { channelId } = req.params;
+    const [streamer] = await (db as any)
+      .select()
+      .from(streamersTable)
+      .where(eq(streamersTable.channelId, channelId))
+      .limit(1);
+
+    if (!streamer) return res.status(404).json({ error: "Streamer not found" });
+    return res.json(streamer);
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
   }
 });
 
