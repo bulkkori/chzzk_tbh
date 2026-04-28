@@ -18,23 +18,27 @@ function toSummary(row: any, confessionCount = 0) {
 }
 
 (router as any).get("/streamers", async (_req: any, res: any) => {
-  const rows = await (db as any)
-    .select({
-      id: streamersTable.id,
-      channelId: streamersTable.channelId,
-      name: streamersTable.name,
-      profileImageUrl: streamersTable.profileImageUrl,
-      username: streamersTable.username,
-      passwordHash: streamersTable.passwordHash,
-      createdAt: streamersTable.createdAt,
-      confessionCount: (sql as any)`COALESCE(COUNT(${confessionsTable.id}) FILTER (WHERE ${confessionsTable.isPrivate} = false), 0)::int`,
-    })
-    .from(streamersTable)
-    .leftJoin(confessionsTable, eq(confessionsTable.streamerId, streamersTable.id))
-    .groupBy(streamersTable.id)
-    .orderBy(desc(streamersTable.createdAt));
-    
-  return res.json(rows.map((r: any) => toSummary(r, Number(r.confessionCount ?? 0))));
+  try {
+    const rows = await (db as any)
+      .select({
+        id: streamersTable.id,
+        channelId: streamersTable.channelId,
+        name: streamersTable.name,
+        profileImageUrl: streamersTable.profileImageUrl,
+        username: streamersTable.username,
+        passwordHash: streamersTable.passwordHash,
+        createdAt: streamersTable.createdAt,
+        confessionCount: (sql as any)`COALESCE(COUNT(${confessionsTable.id}) FILTER (WHERE ${confessionsTable.isPrivate} = false), 0)::int`,
+      })
+      .from(streamersTable)
+      .leftJoin(confessionsTable, eq(confessionsTable.streamerId, streamersTable.id))
+      .groupBy(streamersTable.id)
+      .orderBy(desc(streamersTable.createdAt));
+      
+    return res.json(rows.map((r: any) => toSummary(r, Number(r.confessionCount ?? 0))));
+  } catch (e) {
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 export default router;
