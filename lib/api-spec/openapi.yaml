@@ -1,0 +1,863 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Confession board API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: streamers
+    description: Streamer registration and listing
+  - name: auth
+    description: Streamer authentication
+  - name: confessions
+    description: Confession board operations
+  - name: Storage
+    description: Object storage upload and serving endpoints.
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /streamers:
+    get:
+      operationId: listStreamers
+      tags: [streamers]
+      summary: List all registered streamers
+      responses:
+        "200":
+          description: List of streamers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StreamerSummary"
+
+  /streamers/{channelId}:
+    get:
+      operationId: getStreamer
+      tags: [streamers]
+      summary: Get a single streamer by channel ID
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Streamer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamerSummary"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/streamer/login:
+    post:
+      operationId: streamerLogin
+      tags: [auth]
+      summary: Streamer username/password login (issues an admin token)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/streamer/credentials:
+    post:
+      operationId: setStreamerCredentials
+      tags: [auth]
+      summary: Set or update the streamer's username/password (requires admin token)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetCredentialsInput"
+      responses:
+        "200":
+          description: Credentials saved, fresh token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Token missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Username already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # NOTE: chzzk OAuth endpoints (/auth/chzzk/start, /auth/chzzk/callback) are
+  # browser-redirect flows, not JSON APIs, so they're not described here.
+
+  /streamers/{channelId}/confessions:
+    get:
+      operationId: listConfessions
+      tags: [confessions]
+      summary: List confessions for a streamer (admin sees hidden too with token)
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: category
+          required: false
+          schema:
+            $ref: "#/components/schemas/Category"
+        - in: query
+          name: token
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of confessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConfessionPreview"
+    post:
+      operationId: createConfession
+      tags: [confessions]
+      summary: Create a new confession for a streamer
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateConfessionInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Confession"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /streamers/{channelId}/confessions/stats:
+    get:
+      operationId: getConfessionStats
+      tags: [confessions]
+      summary: Confession statistics for a streamer
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfessionStats"
+
+  /streamers/{channelId}/confessions/healed:
+    get:
+      operationId: listHealedConfessions
+      tags: [confessions]
+      summary: Recently healed confessions for a streamer
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Healed confessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConfessionPreview"
+
+  /streamers/{channelId}/confessions/private:
+    get:
+      operationId: listPrivateConfessions
+      tags: [confessions]
+      summary: List private confessions for a streamer (admin only)
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Private confessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Confession"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /streamers/{channelId}/confessions/admin/all:
+    get:
+      operationId: listAllConfessions
+      tags: [confessions]
+      summary: List all confessions for a streamer including hidden (admin only)
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: All confessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Confession"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /streamers/{channelId}/confessions/{id}:
+    get:
+      operationId: getConfession
+      tags: [confessions]
+      summary: Get a single confession
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: token
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Confession
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Confession"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateConfession
+      tags: [confessions]
+      summary: Update a confession (password required)
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateConfessionInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Confession"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Wrong password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteConfession
+      tags: [confessions]
+      summary: Delete a confession (password required)
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteConfessionInput"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "403":
+          description: Wrong password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /streamers/{channelId}/confessions/{id}/unlock:
+    post:
+      operationId: unlockConfession
+      tags: [confessions]
+      summary: Unlock a hidden confession by author password
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnlockConfessionInput"
+      responses:
+        "200":
+          description: Confession content unlocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Confession"
+        "403":
+          description: Wrong password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /streamers/{channelId}/confessions/{id}/answer:
+    post:
+      operationId: answerConfession
+      tags: [confessions]
+      summary: Streamer answers a confession (admin only)
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnswerConfessionInput"
+      responses:
+        "200":
+          description: Answered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Confession"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /streamers/{channelId}/confessions/{id}/verdict:
+    post:
+      operationId: setConfessionVerdict
+      tags: [confessions]
+      summary: Streamer sets a verdict on a confession (admin only)
+      parameters:
+        - in: path
+          name: channelId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerdictInput"
+      responses:
+        "200":
+          description: Updated confession
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Confession"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /storage/uploads/request-url:
+    post:
+      tags: [Storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+      responses:
+        '200':
+          description: Presigned upload URL generated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to generate upload URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /storage/objects/{objectPath}:
+    get:
+      tags: [Storage]
+      operationId: getStorageObject
+      summary: Serve an object entity from PRIVATE_OBJECT_DIR
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Object content streamed with correct Content-Type.
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Object not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required: [status]
+
+    Category:
+      type: string
+      enum: [학업, 연애, 진로, 관계, 기타]
+
+    Verdict:
+      type: string
+      enum: [guilty, innocent, funny]
+
+    StreamerSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        channelId:
+          type: string
+        name:
+          type: string
+        profileImageUrl:
+          type: string
+          nullable: true
+        confessionCount:
+          type: integer
+        hasCredentials:
+          type: boolean
+        createdAt:
+          type: string
+      required: [id, channelId, name, confessionCount, hasCredentials, createdAt]
+
+    Confession:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        category:
+          $ref: "#/components/schemas/Category"
+        answer:
+          type: string
+          nullable: true
+        isPrivate:
+          type: boolean
+        isHidden:
+          type: boolean
+        verdict:
+          oneOf:
+            - $ref: "#/components/schemas/Verdict"
+            - type: "null"
+        createdAt:
+          type: string
+        answeredAt:
+          type: string
+          nullable: true
+      required: [id, title, content, category, isPrivate, isHidden, createdAt]
+
+    ConfessionPreview:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        category:
+          $ref: "#/components/schemas/Category"
+        hasAnswer:
+          type: boolean
+        isHidden:
+          type: boolean
+        verdict:
+          oneOf:
+            - $ref: "#/components/schemas/Verdict"
+            - type: "null"
+        createdAt:
+          type: string
+      required: [id, title, content, category, hasAnswer, isHidden, createdAt]
+
+    VerdictInput:
+      type: object
+      properties:
+        verdict:
+          oneOf:
+            - $ref: "#/components/schemas/Verdict"
+            - type: "null"
+        token:
+          type: string
+      required: [token]
+
+    LoginInput:
+      type: object
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+      required: [username, password]
+
+    SetCredentialsInput:
+      type: object
+      properties:
+        token:
+          type: string
+          minLength: 1
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: "^[a-zA-Z0-9_.-]+$"
+        password:
+          type: string
+          minLength: 6
+          maxLength: 64
+      required: [token, username, password]
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        streamer:
+          $ref: "#/components/schemas/StreamerSummary"
+      required: [token, streamer]
+
+    CreateConfessionInput:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+        content:
+          type: string
+          minLength: 1
+        category:
+          $ref: "#/components/schemas/Category"
+        password:
+          type: string
+          minLength: 4
+          maxLength: 64
+        isPrivate:
+          type: boolean
+      required: [title, content, category, password]
+
+    DeleteConfessionInput:
+      type: object
+      properties:
+        password:
+          type: string
+          minLength: 1
+      required: [password]
+
+    UnlockConfessionInput:
+      type: object
+      properties:
+        password:
+          type: string
+          minLength: 1
+      required: [password]
+
+    UpdateConfessionInput:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+        content:
+          type: string
+          minLength: 1
+        category:
+          $ref: "#/components/schemas/Category"
+        password:
+          type: string
+          minLength: 1
+        isPrivate:
+          type: boolean
+      required: [title, content, category, password]
+
+    AnswerConfessionInput:
+      type: object
+      properties:
+        answer:
+          type: string
+          minLength: 1
+        token:
+          type: string
+      required: [answer, token]
+
+    ConfessionStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        healed:
+          type: integer
+        waiting:
+          type: integer
+        byCategory:
+          type: array
+          items:
+            type: object
+            properties:
+              category:
+                type: string
+              count:
+                type: integer
+            required: [category, count]
+      required: [total, healed, waiting, byCategory]
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+      required: [success]
+
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+
+    UploadUrlRequest:
+      type: object
+      properties:
+        contentType:
+          type: string
+        filename:
+          type: string
+      required: []
+
+    UploadUrlResponse:
+      type: object
+      properties:
+        uploadUrl:
+          type: string
+        objectPath:
+          type: string
+        publicUrl:
+          type: string
+      required: [uploadUrl, objectPath, publicUrl]
