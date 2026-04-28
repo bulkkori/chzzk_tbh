@@ -3,8 +3,8 @@ import { Readable } from "stream";
 // 1. api-zod 모듈을 any로 가져와 이름 불일치 문제 해결
 import * as apiZodModule from "@workspace/api-zod";
 const {
-  UploadUrlRequest, // RequestUploadUrlBody 대신 실제 존재하는 이름 사용
-  UploadUrlResponse // RequestUploadUrlResponse 대신 실제 존재하는 이름 사용
+  UploadUrlRequest,
+  UploadUrlResponse
 } = apiZodModule as any;
 
 // 2. 로컬 파일 임포트 시 반드시 .js 확장자 추가
@@ -18,7 +18,6 @@ const objectStorageService = new ObjectStorageService();
  * POST /storage/uploads/request-url
  */
 (router as any).post("/storage/uploads/request-url", async (req: any, res: any) => {
-  // 스키마가 존재하지 않을 경우를 대비해 유연하게 처리
   const bodySchema = UploadUrlRequest || (apiZodModule as any).RequestUploadUrlBody;
   const parsed = bodySchema?.safeParse ? bodySchema.safeParse(req.body) : { success: true, data: req.body };
   
@@ -28,7 +27,6 @@ const objectStorageService = new ObjectStorageService();
 
   try {
     const { name, size, contentType } = parsed.data;
-
     const uploadURL = await objectStorageService.getObjectEntityUploadURL();
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 
@@ -60,12 +58,16 @@ const objectStorageService = new ObjectStorageService();
       return res.status(404).json({ error: "File not found" });
     }
 
-    const response = await objectStorageService.downloadObject(file);
+    // ★ 핵심 수정: 반환값을 any로 받아서 타입 충돌 해결
+    const response: any = await objectStorageService.downloadObject(file);
 
     res.status(response.status);
-    response.headers.forEach((value: any, key: any) => res.setHeader(key, value));
+    if (response.headers && typeof response.headers.forEach === 'function') {
+      response.headers.forEach((value: any, key: any) => res.setHeader(key, value));
+    }
 
     if (response.body) {
+      // web stream을 node stream으로 변환
       const nodeStream = Readable.fromWeb(response.body as any);
       nodeStream.pipe(res);
     } else {
@@ -87,10 +89,13 @@ const objectStorageService = new ObjectStorageService();
     const objectPath = `/objects/${wildcardPath}`;
     const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
 
-    const response = await objectStorageService.downloadObject(objectFile);
+    // ★ 핵심 수정: 반환값을 any로 받아서 타입 충돌 해결
+    const response: any = await objectStorageService.downloadObject(objectFile);
 
     res.status(response.status);
-    response.headers.forEach((value: any, key: any) => res.setHeader(key, value));
+    if (response.headers && typeof response.headers.forEach === 'function') {
+      response.headers.forEach((value: any, key: any) => res.setHeader(key, value));
+    }
 
     if (response.body) {
       const nodeStream = Readable.fromWeb(response.body as any);
