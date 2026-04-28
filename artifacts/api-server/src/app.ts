@@ -3,8 +3,8 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import pinoHttp from "pino-http";
-import router from "./routes";
-import { logger } from "./lib/logger";
+import router from "./routes/index.js"; // 폴더인 경우 index.js까지 명시 권장
+import { logger } from "./lib/logger.js";
 
 const app: Express = express();
 
