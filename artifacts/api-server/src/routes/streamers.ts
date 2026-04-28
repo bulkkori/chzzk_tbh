@@ -19,7 +19,7 @@ function toSummary(row: any, confessionCount = 0) {
 
 (router as any).get("/streamers", async (_req: any, res: any) => {
   try {
-    console.log("[DB] 스트리머 목록 조회 시도...");
+    console.log("[DB] 스트리머 목록 조회 시작...");
     
     const rows = await (db as any)
       .select({
@@ -30,28 +30,25 @@ function toSummary(row: any, confessionCount = 0) {
         username: streamersTable.username,
         passwordHash: streamersTable.passwordHash,
         createdAt: streamersTable.createdAt,
-        // FILTER 대신 CASE WHEN을 사용하여 더 안정적으로 카운트합니다.
-        confessionCount: (sql as any)`COUNT(CASE WHEN ${confessionsTable.isPrivate} = false THEN 1 END)::int`,
+        // COUNT 내부에 조건을 넣어 깔끔하게 집계합니다.
+        confessionCount: (sql as any)`count(${confessionsTable.id}) filter (where ${confessionsTable.isPrivate} = false)::int`,
       })
       .from(streamersTable)
       .leftJoin(confessionsTable, eq(confessionsTable.streamerId, streamersTable.id))
-      // PostgreSQL의 엄격한 GROUP BY 규칙을 위해 모든 선택 컬럼을 그룹화합니다.
-      .groupBy(
-        streamersTable.id, 
-        streamersTable.channelId, 
-        streamersTable.name, 
-        streamersTable.profileImageUrl, 
-        streamersTable.username, 
-        streamersTable.password_hash, // 만약 스키마에 이렇게 되어있다면
-        streamersTable.passwordHash, 
-        streamersTable.createdAt
-      )
+      // 중요: streamersTable.id가 Primary Key이므로 이것만 그룹화해도 충분합니다.
+      .groupBy(streamersTable.id)
       .orderBy(desc(streamersTable.createdAt));
       
+    console.log(`[DB] 조회 성공: ${rows.length}건`);
     return res.json(rows.map((r: any) => toSummary(r, Number(r.confessionCount ?? 0))));
+
   } catch (e: any) {
-    console.error("[DB 에러 발생]:", e.message);
-    return res.status(500).json({ error: "Internal Server Error", message: e.message });
+    console.error("[DB 에러 상세]:", e.message);
+    // 에러 발생 시 클라이언트에 상세 메시지 전달 (디버깅용)
+    return res.status(500).json({ 
+      error: "Internal Server Error", 
+      message: e.message 
+    });
   }
 });
 
