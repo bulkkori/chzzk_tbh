@@ -1,6 +1,6 @@
 import { Router } from "express";
 import cookieParser from "cookie-parser";
-import * as dbModule from "@workspace/db";
+import * as dbModule from "../../../lib/db/src/index.js";
 const { db, streamersTable } = dbModule as any;
 import { eq } from "drizzle-orm";
 
