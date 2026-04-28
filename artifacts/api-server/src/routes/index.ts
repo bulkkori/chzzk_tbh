@@ -1,13 +1,12 @@
-import { Router } from "express"; // IRouter 타입 제거
-import healthRouter from "./health.js"; // .js 추가
-import streamersRouter from "./streamers.js"; // .js 추가
-import confessionsRouter from "./confessions.js"; // .js 추가
-import storageRouter from "./storage.js"; // .js 추가
-import authChzzkRouter from "./auth-chzzk.js"; // .js 추가
+import { Router } from "express";
+import healthRouter from "./health.js";
+import streamersRouter from "./streamers.js";
+import confessionsRouter from "./confessions.js";
+import storageRouter from "./storage.js";
+import authChzzkRouter from "./auth-chzzk.js";
 
-const router = Router(); // 타입을 any로 인식하도록 명시적 타입 제거
+const router = Router();
 
-// Express 5 타입 호환성을 위해 any로 캐스팅하여 사용
 (router as any).use(healthRouter);
 (router as any).use(streamersRouter);
 (router as any).use(confessionsRouter);
