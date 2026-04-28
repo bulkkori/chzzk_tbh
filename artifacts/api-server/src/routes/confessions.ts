@@ -1,6 +1,7 @@
 import { Router } from "express";
-// 1. DB 모듈 any 캐스팅
-import * as dbModule from "@workspace/db";
+// 상대 경로를 사용하여 esbuild가 코드를 번들링하도록 유도합니다.
+import * as dbModule from "../../../lib/db/src/index.js";
+import * as apiZodModule from "../../../lib/api-zod/src/index.js";
 const { db, confessionsTable, streamersTable } = dbModule as any;
 import { and, desc, eq, isNotNull, or } from "drizzle-orm";
 import bcrypt from "bcryptjs";
