@@ -108,55 +108,52 @@ const router = Router();
 });
 
 /**
- * 4. [POST] 고민 작성 (500 에러 디버깅 로직 포함)
- * 경로: /api/streamers/:channelId/confessions
+ * [POST] 고민 작성 - 500 에러 방지를 위한 컬럼 최소화 버전
  */
 (router as any).post("/streamers/:channelId/confessions", async (req: any, res: any) => {
   try {
     const { channelId } = req.params;
     const { title, content, category, isPrivate, password } = req.body;
 
-    console.log(`[POST] 저장 시도: 채널=${channelId}`);
-
-    // 1. 스트리머 찾기
+    // 1. 스트리머 UUID 찾기
     const [streamer] = await (db as any)
       .select({ id: streamersTable.id })
       .from(streamersTable)
       .where(eq(streamersTable.channelId, channelId))
       .limit(1);
 
-    if (!streamer) {
-      console.error("[POST] 스트리머를 찾을 수 없음");
-      return res.status(404).json({ error: "Streamer not found" });
-    }
+    if (!streamer) return res.status(404).json({ error: "Streamer not found" });
 
-    // 2. DB 저장 시도
+    // 2. DB 저장 시도 
+    // 만약 특정 컬럼에서 에러가 난다면, 그 컬럼을 주석 처리하며 범인을 찾을 수 있습니다.
+    const insertData: any = {
+      streamerId: streamer.id,
+      content: content || "내용 없음",
+      category: category || "기타",
+      isPrivate: isPrivate ?? false,
+      verdict: "대기", // 이 값이 DB Enum에 없을 경우 에러가 날 수 있음
+    };
+
+    // title이나 passwordHash 컬럼이 DB에 확실히 있는지 확인이 필요합니다.
+    if (title) insertData.title = title;
+    
+    // 만약 passwordHash 컬럼 때문에 에러가 난다면 이 부분을 잠시 주석 처리해 보세요.
+    insertData.passwordHash = password || "1234"; 
+
     const [inserted] = await (db as any)
       .insert(confessionsTable)
-      .values({
-        streamerId: streamer.id,
-        title: title || "",
-        content: content,
-        category: category || "기타",
-        isPrivate: isPrivate ?? false,
-        verdict: "대기",
-        passwordHash: password || "1234",
-      })
+      .values(insertData)
       .returning();
 
-    console.log("[POST] 저장 완료:", inserted.id);
     return res.status(201).json(inserted);
 
   } catch (err: any) {
-    // 500 에러 발생 시 Vercel 로그에서 원인을 찾기 위해 기록
-    console.error("!!! [DB INSERT ERROR] !!!");
-    console.error("Message:", err.message);
-    console.error("Detail:", err.detail); // Postgres의 상세 에러 내용
-    
+    console.error("!!! DB INSERT 실패 !!!", err.message);
+    // 프론트엔드 콘솔에서도 에러 내용을 볼 수 있게 응답에 담아 보냅니다.
     return res.status(500).json({ 
-      error: "Internal Server Error", 
+      error: "DB_ERROR", 
       message: err.message,
-      detail: err.detail
+      detail: err.detail // Postgres가 알려주는 상세 원인 (예: "column does not exist")
     });
   }
 });
