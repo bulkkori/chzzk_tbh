@@ -1,10 +1,8 @@
 import { Router } from "express";
 import cookieParser from "cookie-parser";
-// @workspace 별칭 사용
 import * as dbModule from "@workspace/db";
 const { db, streamersTable } = dbModule as any;
 import { eq } from "drizzle-orm";
-// 내부 lib 경로는 상대경로 + .js 유지
 import { 
   createOAuthState, 
   buildAuthorizeUrl, 
@@ -86,12 +84,26 @@ const COOKIE_OPTIONS = {
     }
 
     const adminToken = signStreamerToken(streamer.id);
-    // 프론트엔드로 리다이렉트 (프론트엔드 URL 확인 필요)
-    const frontendUrl = process.env.NODE_ENV === "production" 
-      ? `https://${req.headers.host?.replace("api-server", "confession-board")}` 
-      : "http://localhost:5173";
+    const hasCredentials = !!(streamer.username && streamer.passwordHash);
 
-    return res.redirect(`${frontendUrl}/auth/callback?token=${adminToken}`);
+    // ALLOWED_ORIGINS의 첫 번째 값을 프론트엔드 URL로 사용
+    const allowedOrigins = process.env.ALLOWED_ORIGINS;
+    const frontendUrl = allowedOrigins
+      ? allowedOrigins.split(",")[0].trim()
+      : (process.env.FRONTEND_URL ?? "http://localhost:3000");
+
+    // 프론트엔드가 hash params로 읽는 구조로 리다이렉트
+    const params = new URLSearchParams({
+      token: adminToken,
+      channelId: streamer.channelId,
+      streamerName: streamer.name,
+      nickname: streamer.username ?? "",
+      hasCredentials: hasCredentials ? "1" : "0",
+      isNew: existing ? "0" : "1",
+      returnTo: verified.returnTo ?? "/",
+    });
+
+    return res.redirect(`${frontendUrl}/auth/callback#${params.toString()}`);
   } catch (err) {
     logger.error({ err }, "Chzzk login failed");
     return res.status(500).send("Login failed");
