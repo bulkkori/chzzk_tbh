@@ -3,10 +3,10 @@
   "buildCommand": "cd ../.. && pnpm --filter @workspace/api-server run build",
   "outputDirectory": ".",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/dist/index" }
+    { "source": "/(.*)", "destination": "/api/index" }
   ],
   "functions": {
-    "dist/index.mjs": {
+    "api/index.js": {
       "maxDuration": 30
     }
   }
